@@ -1,6 +1,13 @@
 # AceFlow
 
-A workflow-focused web UI built on top of **ACE-Step v1.5**.
+A workflow-focused web UI built on top of **[ACE-Step V1.5](https://github.com/ace-step/ACE-Step-1.5)**.
+
+
+<img
+  src="https://github.com/robustini/AceFlow/blob/main/docs/images/aceflow_01.png"
+  alt="AceFlow dashboard"
+  title="AceFlow dashboard"
+  style="display: inline-block; margin: 0 auto; max-width: 200px">
 
 AceFlow does **not** replace ACE-Step and does **not** reimplement the generation engine.  
 It is a structured browser layer on top of the ACE-Step runtime: the UI collects inputs, the backend normalizes and validates them, the in-process queue serializes jobs, and ACE-Step performs the actual generation.
