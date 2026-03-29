@@ -1,0 +1,107 @@
+[
+  {
+    "id": "",
+    "trigger": "",
+    "label": "(Nessun LoRA)"
+  },
+  {
+    "id": "cinematic",
+    "trigger": "j03_h, j03_h",
+    "label": "Cinematic Soundtrack"
+  },
+  {
+    "id": "marcocoldplay",
+    "trigger": "marcocoldplay",
+    "label": "Coldplay"
+  },
+  {
+    "id": "marcosalsa",
+    "trigger": "marcosalsa",
+    "label": "Cuban Salsa"
+  },
+  {
+    "id": "marcodm",
+    "trigger": "marcodm",
+    "label": "Depeche Mode"
+  },
+  {
+    "id": "dkcountry",
+    "trigger": "dkcountry",
+    "label": "DK Country"
+  },
+  {
+    "id": "mstrct",
+    "trigger": "mstrct",
+    "label": "EDM-Techno"
+  },
+  {
+    "id": "marcojingle",
+    "trigger": "marcojingle",
+    "label": "Jingles"
+  },
+  {
+    "id": "marcogaga",
+    "trigger": "marcogaga",
+    "label": "Lady Gaga"
+  },
+  {
+    "id": "marcomadonna_1",
+    "trigger": "marcomadonna",
+    "label": "Madonna (high-epoch)"
+  },
+  {
+    "id": "marcomadonna_2",
+    "trigger": "marcomadonna",
+    "label": "Madonna (low-epoch)"
+  },
+  {
+    "id": "marcomj_1",
+    "trigger": "marcomj",
+    "label": "Michael Jackson (high-epoch)"
+  },
+  {
+    "id": "marcomj_2",
+    "trigger": "marcomj",
+    "label": "Michael Jackson (low-epoch)"
+  },
+  {
+    "id": "reggaeton",
+    "trigger": "reggaeton",
+    "label": "Reggaeton Old School"
+  },
+  {
+    "id": "metal",
+    "trigger": "Symphonic Metal / Technical Death Metal / Symphonic Technical Death Metal",
+    "label": "Symphonic Metal & Technical Death Metal"
+  },
+  {
+    "id": "synth-funk-pop",
+    "trigger": "synth-funk-pop",
+    "label": "Synth-funk pop - New jack swing"
+  },
+  {
+    "id": "marcotswift",
+    "trigger": "marcotswift",
+    "label": "Taylor Swift"
+  },
+  {
+    "id": "marcoqueen_1",
+    "trigger": "marcoqueen",
+    "label": "The Queen / Freddie Mercury (high-epoch)"
+  },
+  {
+    "id": "marcoqueen_2",
+    "trigger": "marcoqueen",
+    "label": "The Queen / Freddie Mercury (low-epoch)"
+  },
+  {
+    "id": "marcopolice",
+    "trigger": "marcopolice",
+    "label": "The Police / Sting"
+  },
+  {
+    "id": "marcou2",
+    "trigger": "marcou2",
+    "label": "U2"
+  }
+]
