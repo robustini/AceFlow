@@ -248,42 +248,70 @@
 
 
         
-        <section class="lora">
-          <h3 data-i18n="title.lora_style"></h3>
-          <p class="section-help" data-i18n="help.lora"></p>
+        <details class="adv" id="lora_settings_details">
+          <summary data-i18n="title.lora_settings"></summary>
+          <div class="details-body">
+            <p class="section-help" data-i18n="help.lora"></p>
 
-          <div class="grid2">
-            <label class="lbl-inline">
-              <span class="setting-label" data-i18n="label.select_lora" data-i18n-title="label.select_lora"></span>
-              <select id="lora_select">
-                <option value="" selected data-i18n="lora.loading"></option>
-              </select>
-            </label>
+            <div class="grid2">
+              <label class="lbl-inline">
+                <span class="setting-label" data-i18n="label.select_lora" data-i18n-title="label.select_lora"></span>
+                <select id="lora_select">
+                  <option value="" selected data-i18n="lora.loading"></option>
+                </select>
+              </label>
 
-            <div class="lbl-inline">
-              <div class="row-space">
-                <span class="setting-label" data-i18n="label.lora_weight" data-i18n-title="label.lora_weight"></span>
-                <input id="lora_weight_num" type="number" inputmode="decimal" autocomplete="off" spellcheck="false" value="0.5" class="num" min="0" max="1" step="0.05" aria-describedby="lora_weight" />
+              <div class="lbl-inline">
+                <div class="row-space">
+                  <span class="setting-label" data-i18n="label.lora_weight" data-i18n-title="label.lora_weight"></span>
+                  <input id="lora_weight_num" type="number" inputmode="decimal" autocomplete="off" spellcheck="false" value="0.5" class="num" min="0" max="2" step="0.05" aria-describedby="lora_weight" />
+                </div>
+                <input id="lora_weight" type="range" min="0" max="2" step="0.05" value="0.5" />
+                <div class="muted small" data-i18n="help.lora_weight"></div>
               </div>
-              <input id="lora_weight" type="range" min="0" max="1" step="0.05" value="0.5" />
-              <div class="muted small" data-i18n="help.lora_weight"></div>
+            </div>
+
+            <div class="grid2" style="margin-top:0.45rem">
+              <div class="lbl-inline">
+                <div class="row-space">
+                  <span class="setting-label" data-i18n="label.lora_weight_self_attn" data-i18n-title="label.lora_weight_self_attn"></span>
+                  <input id="lora_weight_self_attn_num" type="number" inputmode="decimal" autocomplete="off" spellcheck="false" value="0.5" class="num" min="0" max="2" step="0.05" />
+                </div>
+                <input id="lora_weight_self_attn" type="range" min="0" max="2" step="0.05" value="0.5" />
+                <div class="muted small" data-i18n="help.lora_weight_self_attn"></div>
+              </div>
+              <div class="lbl-inline">
+                <div class="row-space">
+                  <span class="setting-label" data-i18n="label.lora_weight_cross_attn" data-i18n-title="label.lora_weight_cross_attn"></span>
+                  <input id="lora_weight_cross_attn_num" type="number" inputmode="decimal" autocomplete="off" spellcheck="false" value="0.5" class="num" min="0" max="2" step="0.05" />
+                </div>
+                <input id="lora_weight_cross_attn" type="range" min="0" max="2" step="0.05" value="0.5" />
+                <div class="muted small" data-i18n="help.lora_weight_cross_attn"></div>
+              </div>
+            </div>
+            <div class="grid2" style="margin-top:0.25rem">
+              <div class="lbl-inline">
+                <div class="row-space">
+                  <span class="setting-label" data-i18n="label.lora_weight_ffn" data-i18n-title="label.lora_weight_ffn"></span>
+                  <input id="lora_weight_ffn_num" type="number" inputmode="decimal" autocomplete="off" spellcheck="false" value="0.5" class="num" min="0" max="2" step="0.05" />
+                </div>
+                <input id="lora_weight_ffn" type="range" min="0" max="2" step="0.05" value="0.5" />
+                <div class="muted small" data-i18n="help.lora_weight_ffn"></div>
+              </div>
+              <div class="lbl-inline" style="align-self:end">
+                <div class="muted small" data-i18n="help.lora_layer_scales_hint"></div>
+              </div>
+            </div>
+
+            <div class="param-stack">
+              <div class="param-row">
+                <label class="chk"><input id="ab_compare_enabled" type="checkbox" /> <span data-i18n="opt.ab_compare"></span></label>
+                <div class="muted small" data-i18n="help.ab_compare"></div>
+              </div>
             </div>
           </div>
+        </details>
 
-          <div class="param-stack">
-            <div class="param-row">
-              <label class="chk"><input id="ab_compare_enabled" type="checkbox" /> <span data-i18n="opt.ab_compare"></span></label>
-              <div class="muted small" data-i18n="help.ab_compare"></div>
-            </div>
-          </div>
-        </section>
-
-        <hr class="sep" />
-
-      
-
-
-        
         <details class="lm-details" id="lm_settings_details">
           <summary data-i18n="title.lm_settings"></summary>
           <div class="details-body">

@@ -114,6 +114,12 @@ const modelSelect = el('model_select');
 const loraSelect = el('lora_select');
 const loraWeight = el('lora_weight');
 const loraWeightNum = el('lora_weight_num');
+const loraWeightSelfAttn = el('lora_weight_self_attn');
+const loraWeightSelfAttnNum = el('lora_weight_self_attn_num');
+const loraWeightCrossAttn = el('lora_weight_cross_attn');
+const loraWeightCrossAttnNum = el('lora_weight_cross_attn_num');
+const loraWeightFfn = el('lora_weight_ffn');
+const loraWeightFfnNum = el('lora_weight_ffn_num');
 
 const __browserNumberLocale = (() => {
   try {
@@ -2378,6 +2384,9 @@ function __snapshotUiForExport(payload) {
     lora_id: payload?.lora_id ?? null,
     lora_trigger: payload?.lora_trigger ?? payload?.lora_tag ?? null,
     lora_weight: (payload?.lora_weight != null) ? payload.lora_weight : null,
+    lora_weight_self_attn: payload?.lora_weight_self_attn ?? null,
+    lora_weight_cross_attn: payload?.lora_weight_cross_attn ?? null,
+    lora_weight_ffn: payload?.lora_weight_ffn ?? null,
     lora_label: __safeOptText(el('lora_select')),
 
     caption: payload?.caption ?? (el('caption') ? el('caption').value : null),
@@ -2525,6 +2534,9 @@ async function downloadMergedJobJson(jsonUrl, jobId, audioUrl, explicitAudioFile
       else if (snap.ui_state?.lora_tag != null) merged.lora_trigger = snap.ui_state.lora_tag;
     }
     if (merged.lora_weight == null && snap.ui_state?.lora_weight != null) merged.lora_weight = snap.ui_state.lora_weight;
+    if (merged.lora_weight_self_attn == null && snap.ui_state?.lora_weight_self_attn != null) merged.lora_weight_self_attn = snap.ui_state.lora_weight_self_attn;
+    if (merged.lora_weight_cross_attn == null && snap.ui_state?.lora_weight_cross_attn != null) merged.lora_weight_cross_attn = snap.ui_state.lora_weight_cross_attn;
+    if (merged.lora_weight_ffn == null && snap.ui_state?.lora_weight_ffn != null) merged.lora_weight_ffn = snap.ui_state.lora_weight_ffn;
   }
 
   const audioFilename = String(explicitAudioFilename || '').trim() || await __resolveDownloadFilename(audioUrl);
@@ -2683,9 +2695,9 @@ function getSelectedLoraWeight() {
   const nEl = document.getElementById('lora_weight_num');
   const rEl = document.getElementById('lora_weight');
   const n = nEl ? readNumericInputValue(nEl) : null;
-  if (Number.isFinite(n)) return Math.max(0, Math.min(1, n));
+  if (Number.isFinite(n)) return Math.max(0, Math.min(2, n));
   const r = rEl ? readNumericInputValue(rEl) : null;
-  if (Number.isFinite(r)) return Math.max(0, Math.min(1, r));
+  if (Number.isFinite(r)) return Math.max(0, Math.min(2, r));
   return 0.5;
 }
 
@@ -2693,6 +2705,11 @@ function clamp01(v) {
   const n = (typeof v === 'number') ? v : readNumericInputValue({ value: v, type: 'text' });
   if (!Number.isFinite(n)) return 0;
   return Math.max(0, Math.min(1, n));
+}
+function clampLoraWeight(v) {
+  const n = (typeof v === 'number') ? v : readNumericInputValue({ value: v, type: 'text' });
+  if (!Number.isFinite(n)) return 0;
+  return Math.max(0, Math.min(2, n));
 }
 function isAbCompareEnabled() {
   return !!el('ab_compare_enabled')?.checked;
@@ -2765,24 +2782,171 @@ function __setPlayerVolume(player, value) {
   player.vol.value = String(v);
   if (typeof player._syncMuteIcon === 'function') player._syncMuteIcon();
 }
+
+async function __copyTextToClipboard(text) {
+  const value = String(text || '');
+  if (!value) return false;
+  try {
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+      await navigator.clipboard.writeText(value);
+      return true;
+    }
+  } catch (e) {}
+  try {
+    const ta = document.createElement('textarea');
+    ta.value = value;
+    ta.setAttribute('readonly', 'readonly');
+    ta.style.position = 'fixed';
+    ta.style.opacity = '0';
+    ta.style.pointerEvents = 'none';
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, ta.value.length);
+    const ok = typeof document.execCommand === 'function' ? document.execCommand('copy') : false;
+    document.body.removeChild(ta);
+    return !!ok;
+  } catch (e) {
+    return false;
+  }
+}
 function formatLoraWeight(v) {
-  const n = clamp01(v);
+  const n = clampLoraWeight(v);
   return n.toFixed(2).replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
 }
 function syncLoraWeight(from, commit = false) {
   if (!loraWeight || !loraWeightNum) return;
   if (from === 'range') {
-    const v = clamp01(readNumericInputValue(loraWeight));
+    const v = clampLoraWeight(readNumericInputValue(loraWeight));
     writeNumericInputValue(loraWeight, v, { preferValueAsNumber: true });
     writeNumericInputValue(loraWeightNum, v, { preferValueAsNumber: true });
   } else if (from === 'num') {
     const raw = readNumericInputValue(loraWeightNum);
     if (!Number.isFinite(raw)) return;
-    const snapped = Math.round(clamp01(raw) / 0.05) * 0.05;
+    const snapped = Math.round(clampLoraWeight(raw) / 0.05) * 0.05;
     writeNumericInputValue(loraWeight, snapped, { preferValueAsNumber: true });
     if (commit) writeNumericInputValue(loraWeightNum, snapped, { preferValueAsNumber: true });
   }
   try { localStorage.setItem('ace_lora_weight', String(formatLoraWeight(getSelectedLoraWeight()))); } catch (e) {}
+  try { _applyLinkedPerLayerLoraDefaults(true); } catch (e) {}
+  try { _persistPerLayerLoraWeights(); } catch (e) {}
+}
+
+const _perLayerLoraStorage = {
+  self_attn: { key: 'ace_lora_weight_self_attn', linkedKey: 'ace_lora_weight_self_attn_linked', rangeEl: loraWeightSelfAttn, numEl: loraWeightSelfAttnNum },
+  cross_attn: { key: 'ace_lora_weight_cross_attn', linkedKey: 'ace_lora_weight_cross_attn_linked', rangeEl: loraWeightCrossAttn, numEl: loraWeightCrossAttnNum },
+  ffn: { key: 'ace_lora_weight_ffn', linkedKey: 'ace_lora_weight_ffn_linked', rangeEl: loraWeightFfn, numEl: loraWeightFfnNum },
+};
+
+function _getPerLayerLoraCurrentMainWeight() {
+  return clampLoraWeight(getSelectedLoraWeight());
+}
+
+function _setPerLayerLoraValue(state, value) {
+  if (!state) return;
+  const v = clampLoraWeight(value);
+  if (state.rangeEl) writeNumericInputValue(state.rangeEl, v, { preferValueAsNumber: true });
+  if (state.numEl) writeNumericInputValue(state.numEl, v, { preferValueAsNumber: true });
+}
+
+function _isPerLayerLoraLinked(state) {
+  if (!state || !state.numEl) return true;
+  return state.numEl.dataset.linked !== '0';
+}
+
+function _setPerLayerLoraLinked(state, linked) {
+  if (!state || !state.numEl) return;
+  state.numEl.dataset.linked = linked ? '1' : '0';
+  if (state.rangeEl) state.rangeEl.dataset.linked = linked ? '1' : '0';
+}
+
+function _syncPerLayerLoraSlider(state, from, commit) {
+  if (!state || !state.rangeEl || !state.numEl) return;
+  if (from === 'range') {
+    const v = clampLoraWeight(readNumericInputValue(state.rangeEl));
+    _setPerLayerLoraLinked(state, false);
+    _setPerLayerLoraValue(state, v);
+    return;
+  }
+  const raw = readNumericInputValue(state.numEl);
+  if (!Number.isFinite(raw)) return;
+  const snapped = Math.round(clampLoraWeight(raw) / 0.05) * 0.05;
+  _setPerLayerLoraLinked(state, false);
+  if (commit) {
+    _setPerLayerLoraValue(state, snapped);
+  } else if (state.rangeEl) {
+    writeNumericInputValue(state.rangeEl, snapped, { preferValueAsNumber: true });
+  }
+}
+
+function _applyLinkedPerLayerLoraDefaults(force = false) {
+  const main = _getPerLayerLoraCurrentMainWeight();
+  for (const state of Object.values(_perLayerLoraStorage)) {
+    if (!state || !state.numEl || !state.rangeEl) continue;
+    if (force || _isPerLayerLoraLinked(state)) {
+      _setPerLayerLoraLinked(state, true);
+      _setPerLayerLoraValue(state, main);
+    }
+  }
+}
+
+function syncLoraWeightSelfAttn(from, commit = false) {
+  _syncPerLayerLoraSlider(_perLayerLoraStorage.self_attn, from, commit);
+  try { _persistPerLayerLoraWeights(); } catch (e) {}
+}
+function syncLoraWeightCrossAttn(from, commit = false) {
+  _syncPerLayerLoraSlider(_perLayerLoraStorage.cross_attn, from, commit);
+  try { _persistPerLayerLoraWeights(); } catch (e) {}
+}
+function syncLoraWeightFfn(from, commit = false) {
+  _syncPerLayerLoraSlider(_perLayerLoraStorage.ffn, from, commit);
+  try { _persistPerLayerLoraWeights(); } catch (e) {}
+}
+
+function _getPerLayerLoraWeight(state) {
+  if (!state || !state.numEl) return null;
+  if (_isPerLayerLoraLinked(state)) return null;
+  const n = readNumericInputValue(state.numEl);
+  return Number.isFinite(n) ? Math.max(0, Math.min(2, n)) : null;
+}
+function getSelectedLoraWeightSelfAttn() { return _getPerLayerLoraWeight(_perLayerLoraStorage.self_attn); }
+function getSelectedLoraWeightCrossAttn() { return _getPerLayerLoraWeight(_perLayerLoraStorage.cross_attn); }
+function getSelectedLoraWeightFfn() { return _getPerLayerLoraWeight(_perLayerLoraStorage.ffn); }
+
+function _persistPerLayerLoraWeights() {
+  for (const state of Object.values(_perLayerLoraStorage)) {
+    if (!state) continue;
+    const linked = _isPerLayerLoraLinked(state);
+    const n = state.numEl ? readNumericInputValue(state.numEl) : null;
+    try { localStorage.setItem(state.linkedKey, linked ? '1' : '0'); } catch (e) {}
+    try { localStorage.setItem(state.key, Number.isFinite(n) ? String(Math.max(0, Math.min(2, n))) : ''); } catch (e) {}
+  }
+}
+
+function _restorePerLayerLoraWeights() {
+  const main = _getPerLayerLoraCurrentMainWeight();
+  for (const state of Object.values(_perLayerLoraStorage)) {
+    if (!state) continue;
+    let linked = true;
+    let value = main;
+    try {
+      const savedLinked = String(localStorage.getItem(state.linkedKey) || '').trim();
+      const savedValue = String(localStorage.getItem(state.key) || '').trim().replace(',', '.');
+      if (savedLinked === '0') linked = false;
+      if (savedValue !== '') {
+        const parsed = Number(savedValue);
+        if (Number.isFinite(parsed)) {
+          value = Math.max(0, Math.min(2, parsed));
+          if (savedLinked === '') linked = false;
+        }
+      } else if (!linked) {
+        linked = true;
+      }
+    } catch (e) {}
+    _setPerLayerLoraLinked(state, linked);
+    _setPerLayerLoraValue(state, linked ? main : value);
+  }
+  try { _persistPerLayerLoraWeights(); } catch (e) {}
 }
 
 
@@ -3465,7 +3629,20 @@ class GradioLikePlayer {
       meta.appendChild(fSpan);
     }
     this.seedSpan = document.createElement('span');
-    this.seedSpan.className = 'gplayerMetaItem';
+    this.seedSpan.className = 'gplayerMetaItem gplayerMetaSeed';
+    this.seedLabel = document.createElement('span');
+    this.seedValueBtn = document.createElement('button');
+    this.seedValueBtn.type = 'button';
+    this.seedValueBtn.className = 'gplayerSeedCopy';
+    this.seedValueBtn.addEventListener('click', () => {
+      this._copyResolvedSeed();
+    });
+    this.seedCopyStatus = document.createElement('span');
+    this.seedCopyStatus.className = 'gplayerSeedCopyStatus';
+    this.seedCopyStatus.setAttribute('aria-live', 'polite');
+    this.seedSpan.appendChild(this.seedLabel);
+    this.seedSpan.appendChild(this.seedValueBtn);
+    this.seedSpan.appendChild(this.seedCopyStatus);
     meta.appendChild(this.seedSpan);
     this._metaEl = meta;
 
@@ -3600,9 +3777,58 @@ class GradioLikePlayer {
   }
 
   _updateMetaLang() {
-    const seedVal = (this.resolvedSeed != null && this.resolvedSeed >= 0) ? String(this.resolvedSeed) : '—';
+    const seedText = this._getResolvedSeedText();
+    const seedAvailable = !!seedText;
     if (this.fileSpan) this.fileSpan.textContent = __tr('player.file', 'File', 'File') + ': ' + this.audioFilename;
-    this.seedSpan.textContent = __tr('player.resolved_seed', 'Resolved seed', 'Seed risolto') + ': ' + seedVal;
+    this.seedLabel.textContent = __tr('player.resolved_seed', 'Resolved seed', 'Seed risolto') + ': ';
+    this.seedValueBtn.textContent = seedText || '—';
+    this.seedValueBtn.disabled = !seedAvailable;
+    this.seedValueBtn.setAttribute('aria-label', seedAvailable
+      ? __tr('player.seed_copy', 'Copy resolved seed', 'Copia seed risolto')
+      : __tr('player.resolved_seed', 'Resolved seed', 'Seed risolto'));
+    this.seedValueBtn.title = seedAvailable
+      ? __tr('player.seed_copy', 'Copy resolved seed', 'Copia seed risolto')
+      : '';
+    this.seedSpan.dataset.copyState = this._seedCopyState || 'idle';
+    this.seedCopyStatus.textContent = this._getSeedCopyStatusText();
+  }
+
+  _getResolvedSeedText() {
+    const n = Number(this.resolvedSeed);
+    if (this.resolvedSeed == null || !Number.isFinite(n) || n < 0) return '';
+    return String(this.resolvedSeed);
+  }
+
+  _getSeedCopyStatusText() {
+    if (this._seedCopyState === 'copied') return __tr('player.seed_copied', 'Copied', 'Copiato');
+    if (this._seedCopyState === 'failed') return __tr('player.seed_copy_failed', 'Copy failed', 'Copia fallita');
+    return '';
+  }
+
+  _setSeedCopyState(state = 'idle') {
+    this._seedCopyState = state;
+    if (this.seedSpan) this.seedSpan.dataset.copyState = state;
+    if (this.seedCopyStatus) this.seedCopyStatus.textContent = this._getSeedCopyStatusText();
+    if (state === 'idle') {
+      if (this.seedValueBtn) this.seedValueBtn.title = this._getResolvedSeedText() ? __tr('player.seed_copy', 'Copy resolved seed', 'Copia seed risolto') : '';
+      return;
+    }
+    if (this.seedValueBtn) {
+      this.seedValueBtn.title = state === 'copied'
+        ? __tr('player.seed_copied', 'Copied', 'Copiato')
+        : __tr('player.seed_copy_failed', 'Copy failed', 'Copia fallita');
+    }
+    clearTimeout(this._seedCopyTimer);
+    this._seedCopyTimer = setTimeout(() => {
+      this._setSeedCopyState('idle');
+    }, 1200);
+  }
+
+  async _copyResolvedSeed() {
+    const seedText = this._getResolvedSeedText();
+    if (!seedText) return;
+    const ok = await __copyTextToClipboard(seedText);
+    this._setSeedCopyState(ok ? 'copied' : 'failed');
   }
 
 
@@ -3958,6 +4184,7 @@ class GradioLikePlayer {
   destroy() {
     try { this.abort.abort(); } catch (e) {  }
     this._stopRAF();
+    clearTimeout(this._seedCopyTimer);
     if (this.audio) {
       try { this.audio.pause(); } catch (e) {  }
       this.audio.src = '';
@@ -4433,6 +4660,9 @@ function buildPayloadForCurrentUi() {
       lora_id,
       lora_trigger,
       lora_weight,
+      lora_weight_self_attn: getSelectedLoraWeightSelfAttn(),
+      lora_weight_cross_attn: getSelectedLoraWeightCrossAttn(),
+      lora_weight_ffn: getSelectedLoraWeightFfn(),
 
       chord_key: el('chord_key')?.value || '',
       chord_scale: el('chord_scale')?.value || 'major',
@@ -4726,8 +4956,8 @@ async function triggerGenerateFromUi() {
     const compareKey = __makeAbCompareKey();
 
     const basePayload = buildPayloadForCurrentUi();
-    const payloadA = __normalizeCustomModeConditioning({ ...basePayload, seed: stableSeed, batch_size: 1, lora_id: '', lora_trigger: '', lora_weight: basePayload.lora_weight, _aceflow_compare_key: compareKey, _aceflow_compare_step: 'A' });
-    const payloadB = __normalizeCustomModeConditioning({ ...basePayload, seed: stableSeed, batch_size: 1, lora_id: basePayload.lora_id, lora_trigger: basePayload.lora_trigger, lora_weight: basePayload.lora_weight, _aceflow_compare_key: compareKey, _aceflow_compare_step: 'B' });
+    const payloadA = __normalizeCustomModeConditioning({ ...basePayload, seed: stableSeed, batch_size: 1, lora_id: '', lora_trigger: '', lora_weight: basePayload.lora_weight, lora_weight_self_attn: null, lora_weight_cross_attn: null, lora_weight_ffn: null, _aceflow_compare_key: compareKey, _aceflow_compare_step: 'A' });
+    const payloadB = __normalizeCustomModeConditioning({ ...basePayload, seed: stableSeed, batch_size: 1, lora_id: basePayload.lora_id, lora_trigger: basePayload.lora_trigger, lora_weight: basePayload.lora_weight, lora_weight_self_attn: basePayload.lora_weight_self_attn, lora_weight_cross_attn: basePayload.lora_weight_cross_attn, lora_weight_ffn: basePayload.lora_weight_ffn, _aceflow_compare_key: compareKey, _aceflow_compare_step: 'B' });
 
     resultBox.classList.add('hidden');
     stopPolling();
@@ -5354,11 +5584,25 @@ function setupImportJson() {
     if (req.lora_weight != null) {
       const n = safeNum(req.lora_weight);
       if (n !== null) {
-        const clamped = Math.max(0, Math.min(1, n));
+        const clamped = Math.max(0, Math.min(2, n));
         setVal('lora_weight', clamped);
         setVal('lora_weight_num', clamped);
       }
     }
+    if (_perLayerLoraStorage.self_attn) {
+      const n = safeNum(req.lora_weight_self_attn);
+      if (n !== null) { _setPerLayerLoraLinked(_perLayerLoraStorage.self_attn, false); _setPerLayerLoraValue(_perLayerLoraStorage.self_attn, n); } else { _setPerLayerLoraLinked(_perLayerLoraStorage.self_attn, true); }
+    }
+    if (_perLayerLoraStorage.cross_attn) {
+      const n = safeNum(req.lora_weight_cross_attn);
+      if (n !== null) { _setPerLayerLoraLinked(_perLayerLoraStorage.cross_attn, false); _setPerLayerLoraValue(_perLayerLoraStorage.cross_attn, n); } else { _setPerLayerLoraLinked(_perLayerLoraStorage.cross_attn, true); }
+    }
+    if (_perLayerLoraStorage.ffn) {
+      const n = safeNum(req.lora_weight_ffn);
+      if (n !== null) { _setPerLayerLoraLinked(_perLayerLoraStorage.ffn, false); _setPerLayerLoraValue(_perLayerLoraStorage.ffn, n); } else { _setPerLayerLoraLinked(_perLayerLoraStorage.ffn, true); }
+    }
+    _applyLinkedPerLayerLoraDefaults(false);
+    _persistPerLayerLoraWeights();
 
     
     if (req.lm_temperature != null) setVal('lm_temperature', safeNum(req.lm_temperature) ?? req.lm_temperature);
@@ -5620,7 +5864,7 @@ ${el('lyrics')?.value || ''}`;
     const savedW = String(localStorage.getItem('ace_lora_weight') || '').trim().replace(',', '.');
     const n = savedW === '' ? NaN : Number(savedW);
     if (Number.isFinite(n)) {
-      const v = Math.max(0, Math.min(1, n));
+      const v = Math.max(0, Math.min(2, n));
       const formatted = formatLoraWeight(v);
       if (loraWeight) writeNumericInputValue(loraWeight, v, { preferValueAsNumber: true });
       if (loraWeightNum) writeNumericInputValue(loraWeightNum, v, { preferValueAsNumber: true });
@@ -5645,6 +5889,25 @@ ${el('lyrics')?.value || ''}`;
       commitNumericFieldOnEnter(e, loraWeightNum, () => syncLoraWeight('num', true));
     });
   }
+
+  const _perLayerPairs = [
+    [_perLayerLoraStorage.self_attn.rangeEl, _perLayerLoraStorage.self_attn.numEl, syncLoraWeightSelfAttn],
+    [_perLayerLoraStorage.cross_attn.rangeEl, _perLayerLoraStorage.cross_attn.numEl, syncLoraWeightCrossAttn],
+    [_perLayerLoraStorage.ffn.rangeEl, _perLayerLoraStorage.ffn.numEl, syncLoraWeightFfn],
+  ];
+  for (const [rangeEl, numEl, syncFn] of _perLayerPairs) {
+    if (rangeEl) rangeEl.addEventListener('input', () => syncFn('range'));
+    if (numEl) {
+      numEl.addEventListener('input', () => syncFn('num', false));
+      numEl.addEventListener('change', () => syncFn('num', true));
+      numEl.addEventListener('blur', () => syncFn('num', true));
+      numEl.addEventListener('keydown', (e) => {
+        commitNumericFieldOnEnter(e, numEl, () => syncFn('num', true));
+      });
+    }
+  }
+
+  _restorePerLayerLoraWeights();
 
   
   setupImportJson();

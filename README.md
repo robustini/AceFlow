@@ -15,11 +15,12 @@ It is a structured browser layer on top of the ACE-Step runtime: the UI collects
 AceFlow exists for users who want something more guided and production-friendly than the raw Gradio page, without losing access to advanced features such as:
 
 - model-aware task routing
-- LoRA selection and A/B compare
+- LoRA selection, advanced layer controls, and A/B compare
 - LM-assisted prompting and transcription helpers
 - source-audio workflows beyond basic generation
 - chord progression tools with real conditioning
 - JSON import/export for round-trip reuse
+- one-click resolved seed copy from result cards
 - queue polling and per-job logs
 - optional authentication and admin user management
 
@@ -411,11 +412,17 @@ These are still important even when advanced features are used, because they def
 
 This section is not just a dropdown.
 
-It includes:
+It is exposed as a single collapsible `LoRA Settings` section and includes:
 
 - LoRA catalog loading
-- LoRA weight
+- LoRA selection
+- main LoRA weight
+- advanced per-layer controls for `Self-Attention`, `Cross-Attention`, and `FFN / MLP`
 - optional A/B compare mode
+
+The three advanced controls follow the main LoRA weight by default and become real overrides once changed manually.
+
+The effective UI range is `0..2` for the main LoRA weight and also `0..2` for the three advanced controls.
 
 The compare mode is intended for direct comparison between:
 
@@ -535,6 +542,17 @@ The local catalog provides the UI-facing mapping for each LoRA entry, typically 
 AceFlow uses a **single-LoRA-per-job** workflow.
 
 If a LoRA is selected, AceFlow can also carry the trigger into the backend request so the conditioning path stays aligned with the chosen style.
+
+AceFlow also supports advanced per-layer LoRA scaling during generation:
+
+- main LoRA weight
+- `Self-Attention` weight
+- `Cross-Attention` weight
+- `FFN / MLP` weight
+
+By default the three advanced values mirror the main weight. If you edit one manually, that field becomes an explicit override for the corresponding layer family at runtime.
+
+The effective range is `0..2` for all four weights, and values above `1.0` remain active in the AceFlow runtime path.
 
 ### A/B compare mode
 
@@ -790,6 +808,8 @@ AceFlow supports both round-trip directions.
 
 Each generated result card exposes a JSON download action.
 
+The result card also shows the resolved seed, which can be copied directly with a single click for quick reuse in later runs or comparisons.
+
 The export is not just a raw backend dump. AceFlow builds a merged structure that may include:
 
 - backend metadata
@@ -810,7 +830,7 @@ The importer tries to reconstruct the current UI state from several shapes and r
 - generation mode
 - model
 - caption and lyrics
-- LoRA selection and weight
+- LoRA selection, main weight, and advanced per-layer weights
 - advanced sampling fields
 - conditioning fields
 - chord settings

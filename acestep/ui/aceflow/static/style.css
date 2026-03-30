@@ -445,6 +445,21 @@ details > .details-body { padding: 14px 16px 16px; }
 .gplayerMsg.err { color: rgba(255,140,140,.95); }
 .gplayerMeta { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 12.5px; color: var(--acc2); min-width: 0; }
 .gplayerMetaItem { min-width: 0; word-break: break-all; overflow-wrap: anywhere; }
+.gplayerMetaSeed { display: inline-flex; align-items: center; gap: 6px; }
+.gplayerSeedCopy {
+  padding: 0 6px; border: 0; border-radius: 8px; background: transparent; color: inherit; font: inherit; cursor: pointer;
+}
+.gplayerSeedCopy:hover { background: rgba(255,255,255,.08); }
+.gplayerSeedCopy:focus-visible { outline: 2px solid rgba(120,180,255,0.85); outline-offset: 2px; }
+.gplayerSeedCopy:disabled { opacity: .72; cursor: default; pointer-events: none; }
+.gplayerSeedCopyStatus {
+  font-size: 11.5px; color: var(--muted2); opacity: 0; transform: translateY(1px);
+  transition: opacity .16s ease, transform .16s ease;
+}
+.gplayerMetaSeed[data-copy-state="copied"] .gplayerSeedCopyStatus,
+.gplayerMetaSeed[data-copy-state="failed"] .gplayerSeedCopyStatus { opacity: 1; transform: translateY(0); }
+.gplayerMetaSeed[data-copy-state="copied"] .gplayerSeedCopyStatus { color: rgba(170,255,190,.95); }
+.gplayerMetaSeed[data-copy-state="failed"] .gplayerSeedCopyStatus { color: rgba(255,190,150,.95); }
 .waveWrap { position: relative; height: 84px; }
 .waveScroller {
   position: relative; height: 84px; overflow-x: auto; overflow-y: hidden;

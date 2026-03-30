@@ -188,7 +188,248 @@ def _parse_lora_weight_value (value :Any ,default :float =0.5 )->float :
             return default 
     if n !=n :
         return default 
-    return max (0.0 ,min (n ,1.0 ))
+    return max (0.0 ,min (n ,2.0 ))
+
+_LORA_LAYER_SELF_ATTN ="self_attn"
+_LORA_LAYER_CROSS_ATTN ="cross_attn"
+_LORA_LAYER_FFN ="ffn"
+_LORA_LAYER_UNKNOWN ="unknown"
+_LORA_LAYER_MARKERS ={
+_LORA_LAYER_SELF_ATTN :("self_attn.",),
+_LORA_LAYER_CROSS_ATTN :("cross_attn.",),
+_LORA_LAYER_FFN :("mlp.","gate_proj","up_proj","down_proj"),}
+
+def _classify_lora_layer_type (module_name :Any )->str :
+
+    name =str (module_name or '').lower ()
+    for marker in _LORA_LAYER_MARKERS [_LORA_LAYER_SELF_ATTN ]:
+        if marker in name :
+            return _LORA_LAYER_SELF_ATTN 
+    for marker in _LORA_LAYER_MARKERS [_LORA_LAYER_CROSS_ATTN ]:
+        if marker in name :
+            return _LORA_LAYER_CROSS_ATTN 
+    for marker in _LORA_LAYER_MARKERS [_LORA_LAYER_FFN ]:
+        if marker in name :
+            return _LORA_LAYER_FFN 
+    return _LORA_LAYER_UNKNOWN 
+
+def _parse_optional_lora_layer_weight (value :Any )->Optional [float ]:
+
+    return _parse_lora_weight_value (value ,default =None )
+
+def _resolve_active_lora_adapter_name (handler ,adapter_name :Optional [str ]=None )->Optional [str ]:
+
+    if isinstance (adapter_name ,str )and adapter_name .strip ():
+        return adapter_name .strip ()
+    active =getattr (handler ,"_lora_active_adapter",None )
+    if isinstance (active ,str )and active .strip ():
+        return active .strip ()
+    try :
+        svc =getattr (handler ,"_lora_service",None )
+        svc_active =getattr (svc ,"active_adapter",None )
+        if isinstance (svc_active ,str )and svc_active .strip ():
+            return svc_active .strip ()
+    except Exception :
+        pass 
+    active_map =getattr (handler ,"_active_loras",None )or {}
+    if isinstance (active_map ,dict )and active_map :
+        try :
+            return str (next (iter (active_map .keys ()))).strip ()
+        except Exception :
+            pass 
+    return None 
+
+def _get_lora_main_scale (handler ,adapter_name :Optional [str ]=None )->float :
+
+    resolved =_resolve_active_lora_adapter_name (handler ,adapter_name )
+    active_map =getattr (handler ,"_active_loras",None )or {}
+    if resolved and isinstance (active_map ,dict )and resolved in active_map :
+        try :
+            return max (0.0 ,min (2.0 ,float (active_map [resolved ])))
+        except Exception :
+            pass 
+    try :
+        return max (0.0 ,min (2.0 ,float (getattr (handler ,"lora_scale",1.0 ))))
+    except Exception :
+        return 1.0 
+
+def _get_lora_layer_scale_store (handler )->dict :
+
+    store =getattr (handler ,"_aceflow_lora_layer_scales",None )
+    if isinstance (store ,dict ):
+        return store 
+    store ={}
+    try :
+        handler ._aceflow_lora_layer_scales =store 
+    except Exception :
+        pass 
+    return store 
+
+def _get_lora_layer_scale_state (handler ,adapter_name :Optional [str ]=None )->dict :
+
+    resolved =_resolve_active_lora_adapter_name (handler ,adapter_name )
+    store =_get_lora_layer_scale_store (handler )
+    if resolved and isinstance (store .get (resolved ),dict ):
+        state =store .get (resolved )or {}
+        return {
+        _LORA_LAYER_SELF_ATTN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_SELF_ATTN )),
+        _LORA_LAYER_CROSS_ATTN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_CROSS_ATTN )),
+        _LORA_LAYER_FFN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_FFN )),}
+    return {
+    _LORA_LAYER_SELF_ATTN :None ,
+    _LORA_LAYER_CROSS_ATTN :None ,
+    _LORA_LAYER_FFN :None ,}
+
+def _set_lora_layer_scale_state (handler ,adapter_name :Optional [str ],state :dict )->None :
+
+    resolved =_resolve_active_lora_adapter_name (handler ,adapter_name )
+    if not resolved :
+        return 
+    store =_get_lora_layer_scale_store (handler )
+    store [resolved ]={
+    _LORA_LAYER_SELF_ATTN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_SELF_ATTN )),
+    _LORA_LAYER_CROSS_ATTN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_CROSS_ATTN )),
+    _LORA_LAYER_FFN :_parse_optional_lora_layer_weight (state .get (_LORA_LAYER_FFN )),}
+
+def _has_lora_layer_overrides (handler ,adapter_name :Optional [str ]=None )->bool :
+
+    state =_get_lora_layer_scale_state (handler ,adapter_name )
+    return any (state .get (k )is not None for k in (_LORA_LAYER_SELF_ATTN ,_LORA_LAYER_CROSS_ATTN ,_LORA_LAYER_FFN ))
+
+def _resolve_effective_lora_layer_scales (handler ,adapter_name :Optional [str ],state :dict )->dict :
+
+    main_scale =_get_lora_main_scale (handler ,adapter_name )
+    effective ={_LORA_LAYER_UNKNOWN :main_scale }
+    for key in (_LORA_LAYER_SELF_ATTN ,_LORA_LAYER_CROSS_ATTN ,_LORA_LAYER_FFN ):
+        value =_parse_optional_lora_layer_weight (state .get (key ))
+        effective [key ]=main_scale if value is None else value 
+    return effective 
+
+def _apply_peft_lora_layer_scales (handler ,adapter_name :str ,effective_scales :dict )->tuple [int ,dict ]:
+
+    try :
+        from acestep .core .lora .scaling import apply_scale_to_adapter as _apply_scale_to_adapter 
+    except Exception as exc :
+        return 0 ,{"adapter":adapter_name ,"error":f"core_scaling_unavailable:{exc}"} 
+    try :
+        handler ._ensure_lora_registry ()
+        if not getattr (handler ,"_lora_adapter_registry",None ):
+            handler ._rebuild_lora_registry ()
+    except Exception as exc :
+        return 0 ,{"adapter":adapter_name ,"error":f"registry_unavailable:{exc}"} 
+    svc =getattr (handler ,"_lora_service",None )
+    registry =getattr (svc ,"registry",None )or {}
+    scale_state =getattr (svc ,"scale_state",None )
+    if not isinstance (scale_state ,dict ):
+        scale_state ={}
+    meta =registry .get (adapter_name )
+    if not meta :
+        return 0 ,{"adapter":adapter_name ,"error":"no_registry"} 
+    grouped ={}
+    for target in (meta .get ("targets",[])or []):
+        layer_type =_classify_lora_layer_type (target .get ("module_name",""))
+        grouped .setdefault (layer_type ,[]).append (target )
+    modified_total =0 
+    modified_by_type ={}
+    skipped_by_type ={}
+    for layer_type ,targets in grouped .items ():
+        layer_scale =effective_scales .get (layer_type ,effective_scales .get (_LORA_LAYER_UNKNOWN ,1.0 ))
+        tmp_registry ={adapter_name :{"path":meta .get ("path"),"targets":targets }}
+        modified ,report =_apply_scale_to_adapter (
+        registry =tmp_registry ,
+        scale_state =scale_state ,
+        adapter_name =adapter_name ,
+        scale =layer_scale ,
+        warn_hook =lambda message :logger .warning (message ),
+        debug_hook =None ,
+        )
+        modified_total +=modified 
+        if modified >0 :
+            modified_by_type [layer_type ]=modified 
+        skipped_total =sum ((report .get ("skipped_by_kind",{})or {}).values ())
+        if skipped_total >0 :
+            skipped_by_type [layer_type ]=skipped_total 
+    report ={
+    "adapter":adapter_name ,
+    "modified_total":modified_total ,
+    "modified_by_type":modified_by_type ,
+    "skipped_by_type":skipped_by_type ,}
+    try :
+        if svc is not None :
+            svc .last_scale_report =report 
+        if callable (getattr (handler ,"_sync_lora_state_from_service",None )):
+            handler ._sync_lora_state_from_service ()
+    except Exception :
+        pass 
+    return modified_total ,report 
+
+def _apply_lokr_layer_scales (handler ,effective_scales :dict )->tuple [int ,dict ]:
+
+    decoder =getattr (getattr (handler ,"model",None ),"decoder",None )
+    lycoris_net =getattr (decoder ,"_lycoris_net",None )
+    if lycoris_net is None :
+        return 0 ,{"error":"missing_lycoris_net"} 
+    modified =0 
+    modified_by_type ={}
+    skipped_by_type ={}
+    touched_any =False 
+    for idx ,module in enumerate (getattr (lycoris_net ,"loras",[])or []):
+        module_name =str (getattr (module ,"lora_name",None )or getattr (module ,"name",None )or f"{module.__class__.__name__}#{idx}")
+        layer_type =_classify_lora_layer_type (module_name )
+        target_scale =effective_scales .get (layer_type ,effective_scales .get (_LORA_LAYER_UNKNOWN ,1.0 ))
+        applied =False 
+        for attr_name in ("multiplier","scale"):
+            if not hasattr (module ,attr_name ):
+                continue 
+            try :
+                setattr (module ,attr_name ,float (target_scale ))
+                applied =True 
+                break 
+            except Exception :
+                pass 
+        if (not applied )and callable (getattr (module ,"set_multiplier",None )):
+            try :
+                module .set_multiplier (float (target_scale ))
+                applied =True 
+            except Exception :
+                pass 
+        if applied :
+            touched_any =True 
+            modified +=1 
+            modified_by_type [layer_type ]=modified_by_type .get (layer_type ,0 )+1 
+        else :
+            skipped_by_type [layer_type ]=skipped_by_type .get (layer_type ,0 )+1 
+    if touched_any :
+        try :
+            net_set_multiplier =getattr (lycoris_net ,"set_multiplier",None )
+            if callable (net_set_multiplier ):
+                net_set_multiplier (1.0 )
+        except Exception :
+            pass 
+    return modified ,{
+    "modified_total":modified ,
+    "modified_by_type":modified_by_type ,
+    "skipped_by_type":skipped_by_type ,
+    "net_touched":touched_any ,}
+
+def _reapply_lora_layer_scales (handler ,adapter_name :Optional [str ]=None )->Optional [str ]:
+
+    if not _has_lora_layer_overrides (handler ,adapter_name ):
+        return None 
+    apply_fn =getattr (handler ,"set_lora_layer_scales",None )
+    if not callable (apply_fn ):
+        return None 
+    state =_get_lora_layer_scale_state (handler ,adapter_name )
+    try :
+        return apply_fn (
+        self_attn_scale =state .get (_LORA_LAYER_SELF_ATTN ),
+        cross_attn_scale =state .get (_LORA_LAYER_CROSS_ATTN ),
+        ffn_scale =state .get (_LORA_LAYER_FFN ),
+        adapter_name =_resolve_active_lora_adapter_name (handler ,adapter_name ),
+        )
+    except Exception as exc :
+        logger .warning (f"[AceFlow LoRA] failed to reapply per-layer scales: {exc}")
+        return None 
 
 def _parse_timesteps_input (value ):
 
@@ -548,6 +789,9 @@ def _install_aceflow_lora_runtime_patch ()->None :
         return 
     original_add_lora =getattr (AceStepHandler ,"add_lora",None )
     original_unload_lora =getattr (AceStepHandler ,"unload_lora",None )
+    original_set_use_lora =getattr (AceStepHandler ,"set_use_lora",None )
+    original_set_lora_scale =getattr (AceStepHandler ,"set_lora_scale",None )
+    original_set_active_lora_adapter =getattr (AceStepHandler ,"set_active_lora_adapter",None )
     if not callable (original_add_lora )or not callable (original_unload_lora ):
         logger .warning ("[AceFlow LoRA] runtime patch skipped: handler methods not found")
         return 
@@ -676,6 +920,7 @@ def _install_aceflow_lora_runtime_patch ()->None :
                 self ._lora_adapter_registry ={}
                 self ._lora_active_adapter =None 
                 self ._lora_scale_state ={}
+                self ._aceflow_lora_layer_scales ={}
             except Exception :
                 pass 
             if getattr (load_result ,"missing_keys",None ):
@@ -726,10 +971,177 @@ def _install_aceflow_lora_runtime_patch ()->None :
         result =original_add_lora (self ,lora_path ,adapter_name )
         logger .info (f"[AceFlow LoRA] state after load: {_format_lora_runtime_state (self )}")
         return result 
+
+    def patched_set_lora_layer_scales (self ,self_attn_scale :Optional [float ]=None ,cross_attn_scale :Optional [float ]=None ,ffn_scale :Optional [float ]=None ,adapter_name :Optional [str ]=None )->str :
+
+        if not getattr (self ,"lora_loaded",False ):
+            return "⚠️ No LoRA loaded"
+        resolved_adapter =_resolve_active_lora_adapter_name (self ,adapter_name )
+        if not resolved_adapter :
+            return "❌ No adapter specified and no active adapter."
+        raw_state ={
+        _LORA_LAYER_SELF_ATTN :_parse_optional_lora_layer_weight (self_attn_scale ),
+        _LORA_LAYER_CROSS_ATTN :_parse_optional_lora_layer_weight (cross_attn_scale ),
+        _LORA_LAYER_FFN :_parse_optional_lora_layer_weight (ffn_scale ),}
+        _set_lora_layer_scale_state (self ,resolved_adapter ,raw_state )
+        effective_scales =_resolve_effective_lora_layer_scales (self ,resolved_adapter ,raw_state )
+        if not getattr (self ,"use_lora",False ):
+            return (
+            f"⚠️ Per-layer scales stored for '{resolved_adapter}' (disabled): "
+            f"self_attn={effective_scales [_LORA_LAYER_SELF_ATTN ]:.2f}, "
+            f"cross_attn={effective_scales [_LORA_LAYER_CROSS_ATTN ]:.2f}, "
+            f"ffn={effective_scales [_LORA_LAYER_FFN ]:.2f}"
+            )
+        report_types =lambda report :(
+            f"modified_by_type={report .get ('modified_by_type',{})or {}} "
+            f"skipped_by_type={report .get ('skipped_by_type',{})or {}}"
+        )
+        if getattr (self ,"_adapter_type",None )=="lokr":
+            modified ,report =_apply_lokr_layer_scales (self ,effective_scales )
+            if modified >0 :
+                return (
+                f"✅ Per-layer LoKr scales ({resolved_adapter}): "
+                f"self_attn={effective_scales [_LORA_LAYER_SELF_ATTN ]:.2f}, "
+                f"cross_attn={effective_scales [_LORA_LAYER_CROSS_ATTN ]:.2f}, "
+                f"ffn={effective_scales [_LORA_LAYER_FFN ]:.2f} "
+                f"({report_types (report )})"
+                )
+            skipped =sum ((report .get ("skipped_by_type",{})or {}).values ())
+            if skipped >0 :
+                return (
+                f"⚠️ Per-layer LoKr scales not fully applied ({resolved_adapter}) "
+                f"(modified={modified}, skipped={skipped}, {report_types (report )})"
+                )
+            err =report .get ("error",None )
+            return f"⚠️ Per-layer LoKr scales unavailable ({err})" if err else f"⚠️ Per-layer LoKr scales unavailable ({resolved_adapter})"
+        modified ,report =_apply_peft_lora_layer_scales (self ,resolved_adapter ,effective_scales )
+        if modified >0 :
+            skipped =sum ((report .get ("skipped_by_type",{})or {}).values ())
+            if skipped >0 :
+                return (
+                f"✅ Per-layer LoRA scales ({resolved_adapter}): "
+                f"self_attn={effective_scales [_LORA_LAYER_SELF_ATTN ]:.2f}, "
+                f"cross_attn={effective_scales [_LORA_LAYER_CROSS_ATTN ]:.2f}, "
+                f"ffn={effective_scales [_LORA_LAYER_FFN ]:.2f} "
+                f"(skipped {skipped}; {report_types (report )})"
+                )
+            return (
+            f"✅ Per-layer LoRA scales ({resolved_adapter}): "
+            f"self_attn={effective_scales [_LORA_LAYER_SELF_ATTN ]:.2f}, "
+            f"cross_attn={effective_scales [_LORA_LAYER_CROSS_ATTN ]:.2f}, "
+            f"ffn={effective_scales [_LORA_LAYER_FFN ]:.2f} "
+            f"({report_types (report )})"
+            )
+        err =report .get ("error",None )
+        if err :
+            return f"⚠️ Per-layer LoRA scales unavailable ({err})"
+        return f"⚠️ Per-layer LoRA scales unchanged ({resolved_adapter})"
+
+    def patched_set_use_lora (self ,use_lora :bool )->str :
+
+        if not callable (original_set_use_lora ):
+            return "❌ set_use_lora unavailable"
+        result =original_set_use_lora (self ,use_lora )
+        if use_lora and _has_lora_layer_overrides (self ):
+            _reapply_lora_layer_scales (self )
+        return result 
+
+    def patched_set_lora_scale (self ,adapter_name_or_scale ,scale :Optional [float ]=None )->str :
+
+        if scale is None :
+            scale_value =adapter_name_or_scale 
+            resolved_adapter =_resolve_active_lora_adapter_name (self ,None )
+        else :
+            scale_value =scale 
+            resolved_adapter =adapter_name_or_scale .strip ()if isinstance (adapter_name_or_scale ,str )and adapter_name_or_scale .strip ()else _resolve_active_lora_adapter_name (self ,None )
+        if not getattr (self ,"lora_loaded",False ):
+            return "⚠️ No LoRA loaded"
+        if not resolved_adapter :
+            return "❌ No adapter specified and no active adapter. Load a LoRA or pass adapter_name."
+        try :
+            scale_value =float (scale_value )
+        except Exception :
+            return "❌ Invalid LoRA scale: please provide a numeric value between 0 and 2."
+        if scale_value !=scale_value or scale_value in (float ('inf'),float ('-inf')):
+            return "❌ Invalid LoRA scale: please provide a finite numeric value between 0 and 2."
+        scale_value =max (0.0 ,min (scale_value ,2.0 ))
+        _active_loras =getattr (self ,"_active_loras",None )or {}
+        self ._active_loras =_active_loras 
+        _active_loras [resolved_adapter ]=scale_value 
+        self .lora_scale =scale_value 
+        adapter_label ="LoKr" if getattr (self ,"_adapter_type",None )=="lokr" else "LoRA"
+        if not getattr (self ,"use_lora",False ):
+            logger .info (f"{adapter_label} scale for '{resolved_adapter}' set to {scale_value:.2f} (will apply when enabled)")
+            return f"✅ {adapter_label} scale ({resolved_adapter}): {scale_value:.2f} ({adapter_label} disabled)"
+        if getattr (self ,"_adapter_type",None )=="lokr":
+            decoder =getattr (getattr (self ,"model",None ),"decoder",None )
+            lycoris_net =getattr (decoder ,"_lycoris_net",None )if decoder is not None else None 
+            set_mul =getattr (lycoris_net ,"set_multiplier",None )if lycoris_net is not None else None 
+            if callable (set_mul ):
+                set_mul (float (scale_value ))
+                logger .info (f"LoKr multiplier set to {scale_value}")
+                if _has_lora_layer_overrides (self ,resolved_adapter ):
+                    _reapply_lora_layer_scales (self ,resolved_adapter )
+                return f"✅ {adapter_label} scale ({resolved_adapter}): {scale_value:.2f}"
+            logger .warning ("LoKr adapter type set but no _lycoris_net found for scale")
+            return f"⚠️ {adapter_label} scale set to {scale_value:.2f} (no LyCORIS net found)"
+        try :
+            rebuilt_adapters =None 
+            if not getattr (self ,"_lora_adapter_registry",None ):
+                _ ,rebuilt_adapters =self ._rebuild_lora_registry ()
+            if rebuilt_adapters is not None :
+                if resolved_adapter not in (rebuilt_adapters or []):
+                    return f"❌ Adapter '{resolved_adapter}' not in loaded adapters: {rebuilt_adapters}"
+                active_adapter =getattr (getattr (self ,"_lora_service",None ),"active_adapter",None )or resolved_adapter 
+                if active_adapter !=resolved_adapter :
+                    self ._lora_service .set_active_adapter (resolved_adapter )
+                    self ._lora_active_adapter =resolved_adapter 
+                    if getattr (self .model ,"decoder",None )and hasattr (self .model .decoder ,"set_adapter"):
+                        try :
+                            self .model .decoder .set_adapter (resolved_adapter )
+                        except Exception :
+                            pass 
+            else :
+                active_adapter =self ._lora_service .ensure_active_adapter ()
+                self ._lora_active_adapter =active_adapter 
+            self ._sync_lora_state_from_service ()
+            modified =self ._apply_scale_to_adapter (resolved_adapter ,scale_value )
+            report =getattr (self ,"_lora_last_scale_report",{})or {}
+            skipped_total =sum ((report .get ("skipped_by_kind",{})or {}).values ())
+            if _has_lora_layer_overrides (self ,resolved_adapter ):
+                _reapply_lora_layer_scales (self ,resolved_adapter )
+            if modified >0 :
+                logger .info (f"LoRA scale for '{resolved_adapter}' set to {scale_value:.2f} (modified={modified}, by_kind={report.get('modified_by_kind', {})}, skipped={report.get('skipped_by_kind', {})})")
+                return f"✅ {adapter_label} scale ({resolved_adapter}): {scale_value:.2f}" if skipped_total ==0 else f"✅ {adapter_label} scale ({resolved_adapter}): {scale_value:.2f} (skipped {skipped_total} targets)"
+            if skipped_total >0 :
+                logger .warning (f"No LoRA targets were modified for adapter '{resolved_adapter}' (skipped={report.get('skipped_by_kind', {})})")
+                return f"⚠️ Scale set to {scale_value:.2f} (skipped {skipped_total} targets)"
+            logger .warning (f"No registered LoRA scaling targets found for adapter '{resolved_adapter}'")
+            return f"⚠️ Scale set to {scale_value:.2f} (no modules found)"
+        except Exception as e :
+            logger .warning (f"Could not set LoRA scale: {e}")
+            return f"⚠️ Scale set to {scale_value:.2f} (partial)"
+
+    def patched_set_active_lora_adapter (self ,adapter_name :str )->str :
+
+        if not callable (original_set_active_lora_adapter ):
+            self ._lora_active_adapter =adapter_name 
+            return f"✅ Active LoRA adapter: {adapter_name}"
+        result =original_set_active_lora_adapter (self ,adapter_name )
+        if _has_lora_layer_overrides (self ,adapter_name )and getattr (self ,"use_lora",False ):
+            _reapply_lora_layer_scales (self ,adapter_name )
+        return result 
     AceStepHandler .unload_lora =patched_unload_lora 
     AceStepHandler .add_lora =patched_add_lora 
+    AceStepHandler .set_lora_layer_scales =patched_set_lora_layer_scales 
+    if callable (original_set_use_lora ):
+        AceStepHandler .set_use_lora =patched_set_use_lora 
+    if callable (original_set_lora_scale ):
+        AceStepHandler .set_lora_scale =patched_set_lora_scale 
+    if callable (original_set_active_lora_adapter ):
+        AceStepHandler .set_active_lora_adapter =patched_set_active_lora_adapter 
     AceStepHandler ._aceflow_lora_runtime_patch =True 
-    logger .info ("[AceFlow LoRA] runtime patch enabled (single-LoRA policy, upstream lifecycle untouched)")
+    logger .info ("[AceFlow LoRA] runtime patch enabled (single-LoRA policy + per-layer scales)")
 
 def _query_nvidia_smi ()->Optional [dict ]:
 
@@ -2244,6 +2656,10 @@ def create_app ()->FastAPI :
         lora_id =(req .get ('lora_id')or '').strip ()
         lora_trigger =(req .get ('lora_trigger')or req .get ('lora_tag')or '').strip ()
         lora_weight =_parse_lora_weight_value (req .get ('lora_weight',0.5 ),default =0.5 )
+        lora_weight_self_attn =_parse_lora_weight_value (req .get ('lora_weight_self_attn'),default =None )
+        lora_weight_cross_attn =_parse_lora_weight_value (req .get ('lora_weight_cross_attn'),default =None )
+        lora_weight_ffn =_parse_lora_weight_value (req .get ('lora_weight_ffn'),default =None )
+        _use_per_layer_lora =any (v is not None for v in (lora_weight_self_attn ,lora_weight_cross_attn ,lora_weight_ffn ))
         lora_path =''
         lora_loaded_for_job =False 
         try :
@@ -2275,6 +2691,10 @@ def create_app ()->FastAPI :
                 lora_id =(req .get ("lora_id")or "").strip ()
                 lora_trigger =(req .get ("lora_trigger")or req .get ("lora_tag")or "").strip ()
                 lora_weight =_parse_lora_weight_value (req .get ("lora_weight",0.5 ),default =0.5 )
+                lora_weight_self_attn =_parse_lora_weight_value (req .get ('lora_weight_self_attn'),default =None )
+                lora_weight_cross_attn =_parse_lora_weight_value (req .get ('lora_weight_cross_attn'),default =None )
+                lora_weight_ffn =_parse_lora_weight_value (req .get ('lora_weight_ffn'),default =None )
+                _use_per_layer_lora =any (v is not None for v in (lora_weight_self_attn ,lora_weight_cross_attn ,lora_weight_ffn ))
                 try :
                     logger .info (
                     f"[LoRA] requested id='{lora_id or ''}' trigger='{lora_trigger or ''}' weight={lora_weight:.2f}"
@@ -2697,6 +3117,18 @@ def create_app ()->FastAPI :
                             logger .warning (f"[LoRA] set_lora_scale warning: {scale_msg}")
                     except Exception as e :
                         logger .warning (f"[LoRA] set_lora_scale exception (continuo comunque): {e}")
+                    if _use_per_layer_lora and hasattr (dit_handler ,"set_lora_layer_scales"):
+                        try :
+                            layer_msg =dit_handler .set_lora_layer_scales (
+                                self_attn_scale =lora_weight_self_attn ,
+                                cross_attn_scale =lora_weight_cross_attn ,
+                                ffn_scale =lora_weight_ffn ,
+                                adapter_name =lora_id or None ,
+                            )
+                            if _use_per_layer_lora or isinstance (layer_msg ,str ):
+                                logger .info (f"[LoRA] per-layer scales: {layer_msg}")
+                        except Exception as e :
+                            logger .warning (f"[LoRA] set_lora_layer_scales exception: {e}")
                     lora_loaded_for_job =True 
                 _seed_list =getattr (config ,"seeds",None )
                 _audio_cover_strength =req .get ('audio_cover_strength',None )
@@ -2887,6 +3319,9 @@ def create_app ()->FastAPI :
                 "lora_id":lora_id ,
                 "lora_trigger":lora_trigger ,
                 "lora_weight":lora_weight ,
+                "lora_weight_self_attn":lora_weight_self_attn ,
+                "lora_weight_cross_attn":lora_weight_cross_attn ,
+                "lora_weight_ffn":lora_weight_ffn ,
                 "lora_path":lora_path ,
                 "lora_loaded":bool (lora_loaded_for_job ),
                 "batch_size":batch_size ,
@@ -2993,6 +3428,9 @@ def create_app ()->FastAPI :
                 'src_audio':req .get ('src_audio',None ),
                 'lora_id':lora_id ,
                 'lora_weight':lora_weight ,
+                'lora_weight_self_attn':lora_weight_self_attn ,
+                'lora_weight_cross_attn':lora_weight_cross_attn ,
+                'lora_weight_ffn':lora_weight_ffn ,
                 'lora_path':lora_path ,
                 'lora_loaded':bool (lora_loaded_for_job ),},
                 'result':{
@@ -3757,6 +4195,10 @@ timesignature: {timesignature}
         lora_id =(payload .get ("lora_id")or "").strip ()
         lora_trigger =(payload .get ("lora_trigger")or payload .get ("lora_tag")or "").strip ()
         lora_weight =_parse_lora_weight_value (payload .get ("lora_weight",0.5 ),default =0.5 )
+        lora_weight_self_attn =_parse_lora_weight_value (payload .get ("lora_weight_self_attn"),default =None )
+        lora_weight_cross_attn =_parse_lora_weight_value (payload .get ("lora_weight_cross_attn"),default =None )
+        lora_weight_ffn =_parse_lora_weight_value (payload .get ("lora_weight_ffn"),default =None )
+        _use_per_layer_lora =any (v is not None for v in (lora_weight_self_attn ,lora_weight_cross_attn ,lora_weight_ffn ))
         _keys =sorted ([str (k )for k in payload .keys ()])if isinstance (payload ,dict )else []
         payload .pop ('_aceflow_compare_key',None )
         payload .pop ('_aceflow_compare_step',None )
@@ -3951,6 +4393,9 @@ timesignature: {timesignature}
         "lora_id":lora_id ,
         "lora_trigger":lora_trigger ,
         "lora_weight":lora_weight ,
+        "lora_weight_self_attn":lora_weight_self_attn ,
+        "lora_weight_cross_attn":lora_weight_cross_attn ,
+        "lora_weight_ffn":lora_weight_ffn ,
         "batch_size":batch_size ,
         "audio_format":audio_format ,
         "mp3_bitrate":payload .get ("mp3_bitrate",None ),
