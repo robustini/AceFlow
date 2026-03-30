@@ -410,9 +410,9 @@ These are still important even when advanced features are used, because they def
 
 ### 5. LoRA block
 
-This section is not just a dropdown.
+LoRA controls and comparison options.
 
-It is exposed as a single collapsible `LoRA Settings` section and includes:
+This block includes:
 
 - LoRA catalog loading
 - LoRA selection
