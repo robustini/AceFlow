@@ -3261,6 +3261,52 @@ let __ACE_STEP_LIMITS = {
   max_inference_steps_current_model: 20,
 };
 
+let __ACE_INFER_METHOD_DESCRIPTIONS = {};
+
+function getInferMethodLabel(method) {
+  const v = String(method || '').trim().toLowerCase();
+  if (v === 'dpm_pp_2m') return 'DPM++ 2M';
+  if (v === 'rk4') return 'RK4 (4th order)';
+  if (v === 'ode') return 'ODE (Euler)';
+  if (v === 'sde') return 'SDE';
+  if (v === 'midpoint') return 'Midpoint (2nd order)';
+  if (v === 'heun') return 'Heun (2nd order)';
+  return v || 'ODE (Euler)';
+}
+
+function updateInferMethodDynamicDescription() {
+  const box = el('infer_method_dynamic_help');
+  if (!box) return;
+  const method = String(el('infer_method')?.value || 'ode').trim().toLowerCase() || 'ode';
+  const lang = (typeof window.getUiLang === 'function' ? String(window.getUiLang() || 'en') : 'en').toLowerCase() === 'it' ? 'it' : 'en';
+  const info = (__ACE_INFER_METHOD_DESCRIPTIONS && typeof __ACE_INFER_METHOD_DESCRIPTIONS === 'object') ? (__ACE_INFER_METHOD_DESCRIPTIONS[method] || {}) : {};
+  const key = `help.infer_method_dynamic.${method}`;
+  let text = '';
+  if (typeof window.t === 'function') {
+    const translated = String(window.t(key) || '').trim();
+    if (translated && translated !== key) text = translated;
+  }
+  if (!text) text = String((info && info[lang]) || (info && info.en) || '').trim();
+  box.textContent = text;
+}
+
+function populateInferMethodOptions(methods, descriptions, preferredValue) {
+  const sel = el('infer_method');
+  if (!sel) return;
+  const values = Array.isArray(methods) && methods.length ? methods.map((v) => String(v || '').trim().toLowerCase()).filter(Boolean) : ['ode', 'sde'];
+  const current = String(preferredValue || sel.value || 'ode').trim().toLowerCase() || 'ode';
+  __ACE_INFER_METHOD_DESCRIPTIONS = (descriptions && typeof descriptions === 'object') ? descriptions : {};
+  sel.innerHTML = '';
+  values.forEach((method) => {
+    const opt = document.createElement('option');
+    opt.value = method;
+    opt.textContent = getInferMethodLabel(method);
+    sel.appendChild(opt);
+  });
+  sel.value = values.includes(current) ? current : (values.includes('ode') ? 'ode' : values[0]);
+  updateInferMethodDynamicDescription();
+}
+
 function isSftModelName(modelName) {
   const v = String(modelName || '').trim().toLowerCase();
   return v.startsWith('sft') || v.includes('sft');
@@ -5303,7 +5349,10 @@ think.addEventListener('change', () => {
 
 setupSeedUI();
 
-
+const inferMethodSelect = el('infer_method');
+if (inferMethodSelect) inferMethodSelect.addEventListener('change', updateInferMethodDynamicDescription);
+window.addEventListener('ace_ui_lang_changed', updateInferMethodDynamicDescription);
+updateInferMethodDynamicDescription();
 
 async function loadOptions() {
   if (!canUseProtectedApi()) return;
@@ -5326,6 +5375,11 @@ async function loadOptions() {
       } catch (e) {}
     }
     const langs = (data && data.valid_languages) ? data.valid_languages : ["unknown","it","en","es","fr","de","pt","ja","ko","zh","ru"];
+    populateInferMethodOptions(
+      (data && data.infer_methods) ? data.infer_methods : ['ode', 'sde'],
+      (data && data.infer_method_descriptions) ? data.infer_method_descriptions : {},
+      data && data.defaults ? data.defaults.infer_method : null
+    );
     chordReferenceSoundfontAvailable = !!(data && data.soundfont_available);
     chordReferenceSoundfontName = String((data && data.soundfont_name) || '');
     updateChordReferenceRendererUi();
@@ -5628,7 +5682,10 @@ function setupImportJson() {
     if (req.mp3_sample_rate != null) setVal('mp3_sample_rate', String(req.mp3_sample_rate));
     refreshMp3ExportControls();
     if (req.inference_steps != null) setVal('steps', safeInt(req.inference_steps) ?? req.inference_steps);
-    if (req.infer_method != null) setVal('infer_method', String(req.infer_method).toLowerCase());
+    if (req.infer_method != null) {
+      setVal('infer_method', String(req.infer_method).toLowerCase());
+      updateInferMethodDynamicDescription();
+    }
     if (req.timesteps != null) setVal('timesteps', Array.isArray(req.timesteps) ? req.timesteps.join(',') : req.timesteps);
     if (req.source_start != null) setVal('source_start', safeNum(req.source_start) ?? req.source_start);
     if (req.source_end != null) setVal('source_end', safeNum(req.source_end) ?? req.source_end);

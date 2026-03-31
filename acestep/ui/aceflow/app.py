@@ -117,6 +117,7 @@ from .queue import InProcessJobQueue
 from .chord_reference import render_reference_wav_file 
 from .chord_soundfont import find_first_soundfont 
 import subprocess 
+from .infer_method_patch import get_infer_method_descriptions ,get_runtime_infer_methods ,install_runtime_infer_method_patch ,normalize_infer_method_request 
 
 ACEFLOW_MP3_BITRATE_OPTIONS =("128k","192k","256k","320k")
 ACEFLOW_MP3_SAMPLE_RATE_OPTIONS =(48000 ,44100 )
@@ -1993,6 +1994,7 @@ def create_app ()->FastAPI :
     ui_root =os .path .dirname (__file__ )
     app =FastAPI (title ="AceFlow")
     app .state ._job_cli_captures ={}
+    app .state ._infer_patch_status =install_runtime_infer_method_patch ()
 
     def _model_name_from_value (v :Optional [str ])->str :
         s =str (v or "").strip ().replace ("\\","/")
@@ -2765,9 +2767,18 @@ def create_app ()->FastAPI :
                 if inference_steps is not None :
                     max_steps =_get_max_inference_steps_for_model (config_name )
                     inference_steps =max (1 ,min (inference_steps ,max_steps ))
-                infer_method =str (req .get ("infer_method")or "ode").strip ().lower ()
-                if infer_method not in {"ode","sde"}:
-                    infer_method ="ode"
+                requested_infer_method =str (req .get ("infer_method")or "ode").strip ().lower ()
+                infer_patch_status =getattr (app .state ,"_infer_patch_status",{})or {}
+                infer_method ,infer_method_reason =normalize_infer_method_request (
+                requested_infer_method ,
+                use_mlx_dit =bool (use_mlx_dit ),
+                patch_installed =bool (infer_patch_status .get ("installed",False )),
+                )
+                logger .info (
+                f"[AceFlow InferMethod] requested={requested_infer_method or 'ode'} applied={infer_method} "
+                f"reason={infer_method_reason} backend={'mlx' if use_mlx_dit else 'torch'} "
+                f"patch_installed={bool (infer_patch_status .get ('installed',False ))}"
+                )
                 timesteps_raw =req .get ("timesteps",None )
                 parsed_timesteps =_parse_timesteps_input (timesteps_raw )
                 source_start =req .get ("source_start",0.0 )
@@ -3745,7 +3756,12 @@ def create_app ()->FastAPI :
         "max_inference_steps_base":ACEFLOW_DEFAULT_MAX_INFERENCE_STEPS_BASE ,
         "max_inference_steps_turbo":ACEFLOW_DEFAULT_MAX_INFERENCE_STEPS_TURBO ,
         "max_inference_steps_other_dit":ACEFLOW_DEFAULT_MAX_INFERENCE_STEPS_TURBO ,},
-        "infer_methods":["ode","sde"],
+        "infer_methods":get_runtime_infer_methods (
+        use_mlx_dit =bool (use_mlx_dit ),
+        patch_installed =bool ((getattr (app .state ,"_infer_patch_status",{})or {}).get ("installed",False )),
+        ),
+        "infer_method_descriptions":get_infer_method_descriptions (),
+        "infer_method_patch_installed":bool ((getattr (app .state ,"_infer_patch_status",{})or {}).get ("installed",False )),
         "mp3_bitrate_options":list (ACEFLOW_MP3_BITRATE_OPTIONS ),
         "mp3_sample_rate_options":list (ACEFLOW_MP3_SAMPLE_RATE_OPTIONS ),
         "core_turbo_step_clamp_bypass_enabled":bypass_installed ,
