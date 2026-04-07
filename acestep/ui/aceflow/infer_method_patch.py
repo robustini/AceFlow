@@ -187,6 +187,43 @@ def _import_module(module_name: str):
     return importlib.import_module(module_name)
 
 
+def _resolve_repaint_helpers(module_globals: Dict[str, Any]) -> tuple[Callable[..., Any], Callable[..., Any]]:
+    repaint_step = module_globals.get("_repaint_step_injection")
+    repaint_blend = module_globals.get("_repaint_boundary_blend")
+    if callable(repaint_step) and callable(repaint_blend):
+        return repaint_step, repaint_blend
+
+    try:
+        import acestep
+
+        handler_file = (
+            inspect.getfile(acestep)
+            .replace("\\", "/")
+            .rsplit("/", 1)[0]
+            + "/core/generation/handler/repaint_step_injection.py"
+        )
+        spec = importlib.util.spec_from_file_location("_aceflow_repaint_step_injection", handler_file)
+        if spec is None or spec.loader is None:
+            raise RuntimeError(f"invalid_repaint_helper_spec:{handler_file}")
+        helper_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(helper_module)
+        apply_repaint_step_injection = getattr(helper_module, "apply_repaint_step_injection")
+        apply_repaint_boundary_blend = getattr(helper_module, "apply_repaint_boundary_blend")
+    except Exception as exc:
+        missing = []
+        if not callable(repaint_step):
+            missing.append("_repaint_step_injection")
+        if not callable(repaint_blend):
+            missing.append("_repaint_boundary_blend")
+        raise KeyError(", ".join(missing) if missing else "repaint_helpers_unavailable") from exc
+
+    if not callable(repaint_step):
+        repaint_step = apply_repaint_step_injection
+    if not callable(repaint_blend):
+        repaint_blend = apply_repaint_boundary_blend
+    return repaint_step, repaint_blend
+
+
 def _quality_generate_audio_impl(
     *,
     self: Any,
@@ -234,8 +271,7 @@ def _quality_generate_audio_impl(
     apg_forward = module_globals["apg_forward"]
     adg_forward = module_globals["adg_forward"]
     logger = module_globals["logger"]
-    repaint_step = module_globals["_repaint_step_injection"]
-    repaint_blend = module_globals["_repaint_boundary_blend"]
+    repaint_step, repaint_blend = _resolve_repaint_helpers(module_globals)
 
     infer_method = _normalize_method(infer_method)
 
@@ -633,8 +669,7 @@ def _turbo_generate_audio_impl(
     EncoderDecoderCache = module_globals["EncoderDecoderCache"]
     DynamicCache = module_globals["DynamicCache"]
     logger = module_globals["logger"]
-    repaint_step = module_globals["_repaint_step_injection"]
-    repaint_blend = module_globals["_repaint_boundary_blend"]
+    repaint_step, repaint_blend = _resolve_repaint_helpers(module_globals)
 
     infer_method = _normalize_method(infer_method)
 
@@ -935,17 +970,28 @@ def _resolve_runtime_patch_plan(cls: type, original_fn: Callable[..., Any]) -> t
     except Exception:
         params = {}
 
-    if "turbo" in lowered and "sft" not in lowered:
+    supports_timesteps = "timesteps" in params
+    is_sft = (
+        ".sft." in lowered
+        or lowered.endswith(".sft")
+        or "modeling_acestep_v15_sft" in lowered
+        or "hyphen_sft_hyphen" in lowered
+        or "_sft_" in lowered
+    )
+    is_turbo = "turbo" in lowered and not is_sft
+    is_base = ".base." in lowered or lowered.endswith(".base") or "modeling_acestep_v15_base" in lowered
+
+    if is_turbo:
         return "turbo", "turbo", True
-    if ".sft." in lowered or lowered.endswith(".sft") or "modeling_acestep_v15_sft" in lowered:
-        return "sft", "quality", True
-    if ".base." in lowered or lowered.endswith(".base") or "modeling_acestep_v15_base" in lowered:
-        return "base", "quality", "timesteps" in params
+    if is_sft:
+        return "sft", "quality", supports_timesteps
+    if is_base:
+        return "base", "quality", supports_timesteps
 
     if "fix_nfe" in params:
         return "turbo", "turbo", True
     if "infer_steps" in params:
-        return ("sft" if "timesteps" in params else "base"), "quality", ("timesteps" in params)
+        return ("sft" if supports_timesteps else "base"), "quality", supports_timesteps
     raise RuntimeError(f"unsupported_runtime_model:{module_name or cls!r}")
 
 

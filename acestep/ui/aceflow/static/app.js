@@ -5691,6 +5691,8 @@ function setupImportJson() {
     if (req.source_end != null) setVal('source_end', safeNum(req.source_end) ?? req.source_end);
     if (req.repaint_mode != null) setVal('repaint_mode', String(req.repaint_mode));
     if (req.repaint_strength != null) setVal('repaint_strength', safeNum(req.repaint_strength) ?? req.repaint_strength);
+    __aceBindRepaintUi();
+    __aceApplyRepaintModeBehavior();
     if (req.track_name != null) __aceSetTrackName(String(req.track_name));
     const importedCompleteTrackClasses = req.complete_track_classes != null ? req.complete_track_classes : req.track_classes;
     if (importedCompleteTrackClasses != null) {
@@ -6150,8 +6152,128 @@ function __aceEnsureExtendedTaskUi() {
       </div>
     `);
     try { syncRangeNumber('repaint_strength_range', 'repaint_strength', { decimals: 2 }); } catch (e) {}
+    __aceBindRepaintUi();
   }
+  __aceBindRepaintUi();
   __aceRefreshExtendedTaskI18n();
+}
+
+function __aceGetRepaintStrengthMemory() {
+  const mode = el('repaint_mode');
+  const raw = mode && mode.dataset ? mode.dataset.repaintStrengthMemory : '';
+  const value = Number.parseFloat(String(raw || ''));
+  return Number.isFinite(value) ? Math.max(0, Math.min(1, value)) : 0.5;
+}
+
+function __aceSetRepaintStrengthMemory(value) {
+  const mode = el('repaint_mode');
+  if (!mode) return;
+  const numeric = Number.parseFloat(String(value));
+  const clamped = Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0.5;
+  mode.dataset.repaintStrengthMemory = String(clamped);
+}
+
+function __aceSetRepaintStrengthValue(value) {
+  const numeric = Number.parseFloat(String(value));
+  const clamped = Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0.5;
+  const numberInput = el('repaint_strength');
+  const rangeInput = el('repaint_strength_range');
+  if (numberInput) numberInput.value = String(clamped);
+  if (rangeInput) rangeInput.value = String(clamped);
+}
+
+function __aceSetRepaintStrengthInteractive(interactive) {
+  const enabled = !!interactive;
+  const numberInput = el('repaint_strength');
+  const rangeInput = el('repaint_strength_range');
+  if (numberInput) numberInput.disabled = !enabled;
+  if (rangeInput) rangeInput.disabled = !enabled;
+}
+
+function __aceApplyRepaintModeBehavior() {
+  const repaintMode = el('repaint_mode');
+  if (!repaintMode) return;
+  const currentStrength = numOrNull(el('repaint_strength')?.value);
+  if (currentStrength != null && currentStrength > 0 && currentStrength < 1) {
+    __aceSetRepaintStrengthMemory(currentStrength);
+  }
+  const modeValue = String(repaintMode.value || 'balanced').trim().toLowerCase() || 'balanced';
+  if (modeValue === 'conservative') {
+    __aceSetRepaintStrengthValue(0);
+    __aceSetRepaintStrengthInteractive(false);
+    return;
+  }
+  if (modeValue === 'aggressive') {
+    __aceSetRepaintStrengthValue(1);
+    __aceSetRepaintStrengthInteractive(false);
+    return;
+  }
+  __aceSetRepaintStrengthValue(__aceGetRepaintStrengthMemory());
+  __aceSetRepaintStrengthInteractive(true);
+}
+
+function __aceHandleRepaintStrengthChange() {
+  const repaintMode = el('repaint_mode');
+  if (!repaintMode) return;
+  const currentStrength = numOrNull(el('repaint_strength')?.value);
+  if (currentStrength == null) return;
+  const clamped = Math.max(0, Math.min(1, currentStrength));
+  __aceSetRepaintStrengthValue(clamped);
+  if (clamped > 0 && clamped < 1) {
+    __aceSetRepaintStrengthMemory(clamped);
+  }
+  const currentMode = String(repaintMode.value || 'balanced').trim().toLowerCase() || 'balanced';
+  if (clamped === 0 && currentMode !== 'conservative') {
+    repaintMode.value = 'conservative';
+    __aceSetRepaintStrengthInteractive(false);
+    return;
+  }
+  if (clamped === 1 && currentMode !== 'aggressive') {
+    repaintMode.value = 'aggressive';
+    __aceSetRepaintStrengthInteractive(false);
+    return;
+  }
+  if (currentMode !== 'balanced' && clamped > 0 && clamped < 1) {
+    repaintMode.value = 'balanced';
+    __aceSetRepaintStrengthInteractive(true);
+    return;
+  }
+  __aceSetRepaintStrengthInteractive(currentMode === 'balanced');
+}
+
+function __aceBindRepaintUi() {
+  const repaintMode = el('repaint_mode');
+  const repaintStrength = el('repaint_strength');
+  const repaintStrengthRange = el('repaint_strength_range');
+  if (!repaintMode || !repaintStrength || !repaintStrengthRange) return;
+  if (!repaintMode.dataset.repaintStrengthMemory) {
+    __aceSetRepaintStrengthMemory(numOrNull(repaintStrength.value) ?? 0.5);
+  }
+  if (repaintMode.dataset.boundAceflowRepaint !== '1') {
+    repaintMode.dataset.boundAceflowRepaint = '1';
+    repaintMode.addEventListener('change', () => {
+      __aceApplyRepaintModeBehavior();
+    });
+  }
+  if (repaintStrength.dataset.boundAceflowRepaint !== '1') {
+    repaintStrength.dataset.boundAceflowRepaint = '1';
+    repaintStrength.addEventListener('input', () => {
+      __aceHandleRepaintStrengthChange();
+    });
+    repaintStrength.addEventListener('change', () => {
+      __aceHandleRepaintStrengthChange();
+    });
+  }
+  if (repaintStrengthRange.dataset.boundAceflowRepaint !== '1') {
+    repaintStrengthRange.dataset.boundAceflowRepaint = '1';
+    repaintStrengthRange.addEventListener('input', () => {
+      __aceHandleRepaintStrengthChange();
+    });
+    repaintStrengthRange.addEventListener('change', () => {
+      __aceHandleRepaintStrengthChange();
+    });
+  }
+  __aceApplyRepaintModeBehavior();
 }
 
 function __aceRefreshExtendedTaskI18n() {
@@ -6489,6 +6611,7 @@ updateRemixSourceWindowVisibility = function () {
   const repaintStrengthRow = el('repaint_strength_row');
   if (repaintModeRow) repaintModeRow.classList.toggle('hidden', !['Repaint', 'Lego'].includes(mode));
   if (repaintStrengthRow) repaintStrengthRow.classList.toggle('hidden', !['Repaint', 'Lego'].includes(mode));
+  __aceBindRepaintUi();
 };
 
 const __ACE_ORIG_bindModelSelectBehavior = bindModelSelectBehavior;
